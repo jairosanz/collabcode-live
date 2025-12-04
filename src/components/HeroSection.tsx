@@ -1,14 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Play, Users, Sparkles } from "lucide-react";
-import { nanoid } from "nanoid";
+import { roomApi } from "@/services/api";
 
 const HeroSection = () => {
   const navigate = useNavigate();
 
-  const createInterview = () => {
-    const roomId = nanoid(10);
-    navigate(`/room/${roomId}`);
+  const createInterview = async () => {
+    const room = await roomApi.create();
+    navigate(`/room/${room.id}`);
   };
 
   return (
