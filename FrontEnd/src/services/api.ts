@@ -35,106 +35,93 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // Room Management
 // ============================================
 
+const API_BASE_URL = "http://localhost:8000";
+
+async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${url}`, options);
+  if (!response.ok) {
+    throw new Error(`API Error: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+// ============================================
+// Room Management
+// ============================================
+
 export const roomApi = {
   /**
    * Create a new interview room
    */
   create: async (): Promise<Room> => {
-    await delay(100);
-    
-    const room: Room = {
-      id: nanoid(10),
-      code: getDefaultCode(),
-      language: "javascript",
-      createdAt: new Date(),
-      connectedUsers: 1,
-    };
-    
-    rooms.set(room.id, room);
-    return room;
+    return fetchJson<Room>("/rooms", {
+      method: "POST",
+    });
   },
 
   /**
    * Get room by ID
    */
   get: async (roomId: string): Promise<Room | null> => {
-    await delay(50);
-    
-    // If room doesn't exist, create it (for demo purposes)
-    if (!rooms.has(roomId)) {
-      const room: Room = {
-        id: roomId,
-        code: getDefaultCode(),
-        language: "javascript",
-        createdAt: new Date(),
-        connectedUsers: 1,
-      };
-      rooms.set(roomId, room);
+    try {
+      return await fetchJson<Room>(`/rooms/${roomId}`);
+    } catch (error) {
+      console.error("Failed to get room", error);
+      return null;
     }
-    
-    return rooms.get(roomId) || null;
   },
 
   /**
    * Join a room
    */
   join: async (roomId: string): Promise<Room | null> => {
-    await delay(50);
-    
-    const room = rooms.get(roomId);
-    if (room) {
-      room.connectedUsers += 1;
-      return room;
+    try {
+      return await fetchJson<Room>(`/rooms/${roomId}/join`, {
+        method: "POST"
+      });
+    } catch (error) {
+      console.error("Failed to join room", error);
+      return null;
     }
-    
-    // Create room if it doesn't exist
-    return roomApi.get(roomId);
   },
 
   /**
    * Leave a room
    */
   leave: async (roomId: string): Promise<void> => {
-    await delay(50);
-    
-    const room = rooms.get(roomId);
-    if (room && room.connectedUsers > 0) {
-      room.connectedUsers -= 1;
-    }
+    await fetchJson(`/rooms/${roomId}/leave`, {
+      method: "POST"
+    });
   },
 
   /**
    * Update room code
    */
   updateCode: async (roomId: string, code: string): Promise<void> => {
-    await delay(10);
-    
-    const room = rooms.get(roomId);
-    if (room) {
-      room.code = code;
-    }
+    await fetchJson(`/rooms/${roomId}/code`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
   },
 
   /**
    * Update room language
    */
   updateLanguage: async (roomId: string, language: string): Promise<void> => {
-    await delay(10);
-    
-    const room = rooms.get(roomId);
-    if (room) {
-      room.language = language;
-    }
+    await fetchJson(`/rooms/${roomId}/language`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language }),
+    });
   },
 
   /**
    * Get connected users count
    */
   getConnectedUsers: async (roomId: string): Promise<number> => {
-    await delay(20);
-    
-    const room = rooms.get(roomId);
-    return room?.connectedUsers || 1;
+    const res = await fetchJson<{ count: number }>(`/rooms/${roomId}/users/count`);
+    return res.count;
   },
 };
 
@@ -144,119 +131,62 @@ export const roomApi = {
 
 export const codeApi = {
   /**
-   * Execute code (browser-based for JS/TS, mocked for others)
+   * Execute code (via Backend)
    */
   execute: async (code: string, language: string): Promise<CodeExecutionResult> => {
-    await delay(300);
-
-    // Only JavaScript/TypeScript can be executed in the browser
-    if (language !== "javascript" && language !== "typescript") {
-      return {
-        output: "",
-        error: `Browser execution is only available for JavaScript/TypeScript.\n\nFor ${language}, you would need a backend execution service.`,
-      };
-    }
-
-    try {
-      const logs: string[] = [];
-
-      const customConsole = {
-        log: (...args: unknown[]) => {
-          logs.push(args.map((arg) => formatOutput(arg)).join(" "));
-        },
-        error: (...args: unknown[]) => {
-          logs.push(`[Error] ${args.map((arg) => formatOutput(arg)).join(" ")}`);
-        },
-        warn: (...args: unknown[]) => {
-          logs.push(`[Warn] ${args.map((arg) => formatOutput(arg)).join(" ")}`);
-        },
-        info: (...args: unknown[]) => {
-          logs.push(args.map((arg) => formatOutput(arg)).join(" "));
-        },
-      };
-
-      const wrappedCode = `
-        (function(console) {
-          "use strict";
-          ${code}
-        })
-      `;
-
-      const fn = new Function("return " + wrappedCode)();
-      const result = fn(customConsole);
-
-      if (result !== undefined) {
-        logs.push(`\n→ ${formatOutput(result)}`);
-      }
-
-      return {
-        output: logs.join("\n") || "Code executed successfully (no output)",
-      };
-    } catch (err) {
-      const error = err as Error;
-      return {
-        output: "",
-        error: `${error.name}: ${error.message}`,
-      };
-    }
+    return fetchJson<CodeExecutionResult>("/execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, language }),
+    });
   },
 };
 
 // ============================================
-// Real-time Collaboration (Mocked)
+// Real-time Collaboration (Polling fallback for now)
 // ============================================
 
 type CodeChangeCallback = (code: string) => void;
 type UserChangeCallback = (count: number) => void;
 
-const codeSubscribers = new Map<string, Set<CodeChangeCallback>>();
-const userSubscribers = new Map<string, Set<UserChangeCallback>>();
-
+// Simple polling for "realtime" updates since we don't have WebSockets yet
 export const realtimeApi = {
   /**
-   * Subscribe to code changes in a room
+   * Subscribe to code changes in a room (Polling)
    */
   subscribeToCode: (roomId: string, callback: CodeChangeCallback): (() => void) => {
-    if (!codeSubscribers.has(roomId)) {
-      codeSubscribers.set(roomId, new Set());
-    }
-    codeSubscribers.get(roomId)!.add(callback);
+    const interval = setInterval(async () => {
+      const room = await roomApi.get(roomId);
+      if (room) {
+        callback(room.code);
+      }
+    }, 2000); // Poll every 2s
 
-    // Return unsubscribe function
-    return () => {
-      codeSubscribers.get(roomId)?.delete(callback);
-    };
+    return () => clearInterval(interval);
   },
 
   /**
    * Broadcast code change to other users
    */
   broadcastCode: (roomId: string, code: string): void => {
-    // In a real implementation, this would send to the server
-    // For now, we just update local state
-    roomApi.updateCode(roomId, code);
-    
-    // Notify subscribers (simulating real-time updates)
-    codeSubscribers.get(roomId)?.forEach((callback) => {
-      callback(code);
-    });
+    // Debounce or just send
+    roomApi.updateCode(roomId, code).catch(console.error);
   },
 
   /**
-   * Subscribe to user presence changes
+   * Subscribe to user presence changes (Polling)
    */
   subscribeToUsers: (roomId: string, callback: UserChangeCallback): (() => void) => {
-    if (!userSubscribers.has(roomId)) {
-      userSubscribers.set(roomId, new Set());
-    }
-    userSubscribers.get(roomId)!.add(callback);
+    const interval = setInterval(async () => {
+      try {
+        const count = await roomApi.getConnectedUsers(roomId);
+        callback(count);
+      } catch (e) {
+        console.error(e);
+      }
+    }, 5000); // Poll every 5s
 
-    // Simulate initial user count
-    setTimeout(() => callback(1), 100);
-
-    return () => {
-      userSubscribers.get(roomId)?.delete(callback);
-    };
+    return () => clearInterval(interval);
   },
 };
 
