@@ -1,0 +1,16 @@
+{
+  "name": "collabcode-live",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "concurrently \"make -C BackEnd run\" \"cd FrontEnd && npm run dev\" --names \"BACKEND,FRONTEND\" -c \"blue,magenta\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
