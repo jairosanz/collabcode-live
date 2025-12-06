@@ -28,17 +28,31 @@ const InterviewRoom = () => {
         setConnectedUsers(room.connectedUsers);
       }
       setIsLoading(false);
+
+      // Join via Socket
+      realtimeApi.joinRoom(roomId);
     };
 
     initRoom();
 
-    // Subscribe to user presence
+    // Subscribe to real-time updates
     const unsubscribeUsers = realtimeApi.subscribeToUsers(roomId, setConnectedUsers);
+    const unsubscribeCode = realtimeApi.subscribeToCode(roomId, setCode);
+    const unsubscribeLanguage = realtimeApi.subscribeToLanguage(roomId, setLanguage);
+    const unsubscribeOutput = realtimeApi.subscribeToOutput(roomId, (result) => {
+      setOutput(result.output);
+      setError(result.error);
+      setIsRunning(false);
+    });
 
     // Cleanup on unmount
     return () => {
       unsubscribeUsers();
+      unsubscribeCode();
+      unsubscribeLanguage();
+      unsubscribeOutput();
       roomApi.leave(roomId);
+      realtimeApi.leaveRoom(roomId);
     };
   }, [roomId]);
 
@@ -57,22 +71,28 @@ const InterviewRoom = () => {
       setLanguage(newLanguage);
       if (roomId) {
         await roomApi.updateLanguage(roomId, newLanguage);
+        realtimeApi.broadcastLanguage(roomId, newLanguage);
       }
     },
     [roomId]
   );
 
   const handleRunCode = useCallback(async () => {
+    if (!roomId) return;
+
     setIsRunning(true);
     setOutput("");
     setError(undefined);
 
-    const result = await codeApi.execute(code, language);
+    // Execution result will be received via socket, but we check here too if needed
+    // or we can just rely on socket.
+    // However, since api returns it, we can update locally OR wait for socket.
+    // Waiting for socket ensures consistency. But let's do both or just rely on socket.
+    // The current backend implementation returns the result AND broadcasts it.
+    await codeApi.execute(code, language, roomId);
+    // The state update will happen in the subscription callback
 
-    setOutput(result.output);
-    setError(result.error);
-    setIsRunning(false);
-  }, [code, language]);
+  }, [code, language, roomId]);
 
   if (isLoading) {
     return (

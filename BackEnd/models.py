@@ -25,6 +25,7 @@ class UpdateLanguageRequest(BaseModel):
 class ExecuteCodeRequest(BaseModel):
     code: str
     language: str
+    roomId: str
 
 class ConnectedUsersResponse(BaseModel):
     count: int

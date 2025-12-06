@@ -4,6 +4,7 @@
  */
 
 import { nanoid } from "nanoid";
+import { io, Socket } from "socket.io-client";
 
 // Types
 export interface Room {
@@ -36,6 +37,9 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // ============================================
 
 const API_BASE_URL = "http://localhost:8000";
+
+// Initialize Socket.IO
+const socket: Socket = io(API_BASE_URL);
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${url}`, options);
@@ -72,7 +76,7 @@ export const roomApi = {
   },
 
   /**
-   * Join a room
+   * Join a room (HTTP)
    */
   join: async (roomId: string): Promise<Room | null> => {
     try {
@@ -86,7 +90,7 @@ export const roomApi = {
   },
 
   /**
-   * Leave a room
+   * Leave a room (HTTP)
    */
   leave: async (roomId: string): Promise<void> => {
     await fetchJson(`/rooms/${roomId}/leave`, {
@@ -95,7 +99,7 @@ export const roomApi = {
   },
 
   /**
-   * Update room code
+   * Update room code (HTTP)
    */
   updateCode: async (roomId: string, code: string): Promise<void> => {
     await fetchJson(`/rooms/${roomId}/code`, {
@@ -106,7 +110,7 @@ export const roomApi = {
   },
 
   /**
-   * Update room language
+   * Update room language (HTTP)
    */
   updateLanguage: async (roomId: string, language: string): Promise<void> => {
     await fetchJson(`/rooms/${roomId}/language`, {
@@ -133,60 +137,103 @@ export const codeApi = {
   /**
    * Execute code (via Backend)
    */
-  execute: async (code: string, language: string): Promise<CodeExecutionResult> => {
+  execute: async (code: string, language: string, roomId: string): Promise<CodeExecutionResult> => {
     return fetchJson<CodeExecutionResult>("/execute", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, language }),
+      body: JSON.stringify({ code, language, roomId }),
     });
   },
 };
 
 // ============================================
-// Real-time Collaboration (Polling fallback for now)
+// Real-time Collaboration (Socket.IO)
 // ============================================
 
 type CodeChangeCallback = (code: string) => void;
+type LanguageChangeCallback = (language: string) => void;
 type UserChangeCallback = (count: number) => void;
+type OutputChangeCallback = (result: CodeExecutionResult) => void;
 
-// Simple polling for "realtime" updates since we don't have WebSockets yet
 export const realtimeApi = {
   /**
-   * Subscribe to code changes in a room (Polling)
+   * Join room via socket
+   */
+  joinRoom: (roomId: string) => {
+    socket.emit("join_room", roomId);
+  },
+
+  /**
+   * Leave room via socket
+   */
+  leaveRoom: (roomId: string) => {
+    socket.emit("leave_room", roomId);
+  },
+
+  /**
+   * Subscribe to code changes
    */
   subscribeToCode: (roomId: string, callback: CodeChangeCallback): (() => void) => {
-    const interval = setInterval(async () => {
-      const room = await roomApi.get(roomId);
-      if (room) {
-        callback(room.code);
-      }
-    }, 2000); // Poll every 2s
-
-    return () => clearInterval(interval);
+    const handler = (newCode: string) => {
+      callback(newCode);
+    };
+    socket.on("code_change", handler);
+    return () => {
+      socket.off("code_change", handler);
+    };
   },
 
   /**
-   * Broadcast code change to other users
+   * Broadcast code change
    */
   broadcastCode: (roomId: string, code: string): void => {
-    // Debounce or just send
-    roomApi.updateCode(roomId, code).catch(console.error);
+    socket.emit("code_change", { roomId, code });
   },
 
   /**
-   * Subscribe to user presence changes (Polling)
+   * Subscribe to language changes
+   */
+  subscribeToLanguage: (roomId: string, callback: LanguageChangeCallback): (() => void) => {
+    const handler = (newLanguage: string) => {
+      callback(newLanguage);
+    };
+    socket.on("language_change", handler);
+    return () => {
+      socket.off("language_change", handler);
+    };
+  },
+
+  /**
+   * Broadcast language change
+   */
+  broadcastLanguage: (roomId: string, language: string): void => {
+    socket.emit("language_change", { roomId, language });
+  },
+
+  /**
+   * Subscribe to user presence changes
    */
   subscribeToUsers: (roomId: string, callback: UserChangeCallback): (() => void) => {
-    const interval = setInterval(async () => {
-      try {
-        const count = await roomApi.getConnectedUsers(roomId);
-        callback(count);
-      } catch (e) {
-        console.error(e);
-      }
-    }, 5000); // Poll every 5s
+    const handler = (count: number) => {
+      callback(count);
+    };
+    socket.on("user_count_update", handler);
+    return () => {
+      socket.off("user_count_update", handler);
+    };
+  },
 
-    return () => clearInterval(interval);
+  /**
+   * Subscribe to code output changes
+   */
+  subscribeToOutput: (roomId: string, callback: OutputChangeCallback): (() => void) => {
+    const handler = (result: CodeExecutionResult) => {
+      callback(result);
+    };
+    socket.on("code_output", handler);
+    return () => {
+      socket.off("code_output", handler);
+    };
   },
 };
 
